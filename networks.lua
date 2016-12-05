@@ -13,11 +13,208 @@ local misc = require "misc"
 
 -- ============================== NETWORKS ====================================
 
--- TODO: add popular architectures, i.e. Alexnet, VGG-net, Deeplab etc.
+-- TODO: replace network input arguments to opts and modify initilizeModule functions
+local Convolution,MaxPooling,ReLU,CrossMapLRN,Dropout,BatchNormalization
+if cudnn then
+    Convolution = cudnn.SpatialConvolution
+    MaxPooling  = cudnn.SpatialMaxPooling
+    CrossMapLRN = cudnn.SpatialCrossMapLRN
+    BatchNorm   = cudnn.SpatialBatchNormalization
+    ReLU        = cudnn.ReLU
+else
+    Convolution = nn.SpatialConvolution
+    MaxPooling  = nn.SpatialMaxPooling
+    CrossMapLRN = nn.SpatialCrossMapLRN
+    BatchNorm   = nn.SpatialBatchNormalization
+    ReLU        = nn.ReLU    
+end
+Dropout = nn.Dropout
 
--- Architecture described in the paper "Multi-scale Context Aggregation by 
--- Dilated Convolutions" by Fisher Yu and Vladlen Koltun (ICLR 2016)
-function P.CADC(numClasses,initMethod,...)
+
+-- "ImageNet Classification with Deep Convolutional Neural Networks" 
+-- Alex Krizhevsky, Ilya Sutskever, Geoffrey Hinton (NIPS 2012)
+function P.AlexNet(numClasses,opts,initMethod,...)
+    -- NOTE: Instead of splitting inputs of conv2 and conv3 in two blocks we use 
+    -- a full connection table
+    local net = nn.Sequential()
+    -- Conv 1
+    net:add(Convolution(3,96, 11,11, 4,4))
+    net:add(ReLU(true))
+    net:add(CrossMapLRN(96))
+    net:add(MaxPooling(3,3, 2,2))
+    -- Conv 2
+    net:add(Convolution(96,256, 5,5, 1,1, 2,2))
+    net:add(ReLU(true))
+    net:add(CrossMapLRN(256))
+    net:add(MaxPooling(3,3, 2,2))
+    -- Conv 3
+    net:add(Convolution(256,384, 3,3, 1,1, 1,1))
+    net:add(ReLU(true))
+    -- Conv 4
+    net:add(Convolution(384,384, 3,3, 1,1, 1,1))
+    net:add(ReLU(true))
+    -- Conv 5
+    net:add(Convolution(384,256, 3,3, 1,1, 1,1))
+    net:add(ReLU(true))
+    net:add(MaxPooling(3,3, 2,2))
+    -- Conv 6
+    net:add(Convolution(256,4096, 6,6, 1,1))
+    net:add(ReLU(true))
+    net:add(Dropout())
+    -- Conv 7
+    net:add(Convolution(4096,4096, 1,1, 1,1))
+    net:add(ReLU(true))
+    net:add(Dropout())
+    -- Classification layer
+    net:add(Convolution(4096,numClasses, 1,1, 1,1))
+    
+    if initMethod then
+        P.initializeNetWeights(net,initMethod,...)
+    end
+
+    -- TODO: add option for batch normalization
+
+    return net
+end
+
+-- "Visualizing and Understanding Convolutional Networks" 
+-- Matthew D. Zeiler, Rob Fergus (ECCV 2014)
+function P.ZF(numClasses,opts,initMethod,...)
+    local net = nn.Sequential()
+    -- Conv 1
+    net:add(Convolution(3,96, 7,7, 2,2))
+    net:add(ReLU(true))
+    net:add(CrossMapLRN(96))
+    net:add(MaxPooling(3,3, 2,2))
+    -- Conv 2
+    net:add(Convolution(96,256, 5,5, 1,1, 2,2))
+    net:add(ReLU(true))
+    net:add(CrossMapLRN(256))
+    net:add(MaxPooling(3,3, 2,2))
+    -- Conv 3
+    net:add(Convolution(256,384, 3,3, 1,1, 1,1))
+    net:add(ReLU(true))
+    -- Conv 4
+    net:add(Convolution(384,384, 3,3, 1,1, 1,1))
+    net:add(ReLU(true))
+    -- Conv 5
+    net:add(Convolution(384,256, 3,3, 1,1, 1,1))
+    net:add(ReLU(true))
+    net:add(MaxPooling(3,3, 2,2))
+    -- Conv 6
+    net:add(Convolution(256,4096, 6,6, 1,1))
+    net:add(ReLU(true))
+    net:add(nn.Dropout())
+    -- Conv 7
+    net:add(Convolution(4096,4096, 1,1, 1,1))
+    net:add(ReLU(true))
+    net:add(nn.Dropout())
+    -- Classification layer
+    net:add(Convolution(4096,numClasses, 1,1, 1,1))
+    
+    if initMethod then
+        P.initializeNetWeights(net,initMethod,...)
+    end
+
+    return net
+
+end
+
+-- "Gradient-Based Learning Applied to Document Recognition"
+-- Yann LeCun, Leon Bottou, Yoshua Bengio, Patrick Haffner (Proc IEEE 1998)
+function P.LeNet(numClasses,opts,initMethod,...)
+    local net = nn.Sequential()
+    -- Conv 1
+    net:add(Convolution(1,20, 5,5))
+    net:add(MaxPooling(2,2, 2,2))
+    -- Conv 2
+    net:add(Convolution(20,50, 5,5))
+    net:add(MaxPooling(2,2, 2,2))
+    -- Conv 3
+    net:add(Convolution(50,500, 4,4))
+    net:add(ReLU(true))
+    -- Classification layer
+    net:add(Convolution(500,numClasses, 4,4))
+
+    if initMethod then
+        P.initializeNetWeights(net,initMethod,...)
+    end
+
+    return net
+end
+
+function P.GoogLeNet(numClasses,opts,initMethod)
+end
+
+-- Architectures described in the paper "Very Deep Convolutional Networks for 
+-- Large-Scale Image Recognition" by Karen Simonyan and Andrew Zisserman (ICLR 2015)
+function P.VGG(numClasses,numLayers,opts,initMethod,...)
+
+    local function ConvolutionReLU(...)
+        local arg = {...}
+        local s = nn.Sequential()
+        s:add(Convolution(...))
+        if opts.batchNormalization then s:add(BatchNorm(arg[2])) end
+        s:add(ReLU(true))
+        return s
+    end
+
+    local net = nn.Sequential()
+    -- ConvBlock 1
+    net:add(ConvolutionReLU(3, 64, 3,3))
+    if numLayers > 11 then net:add(ConvolutionReLU(64,64, 3,3)) end
+    net:add(MaxPooling(2,2, 2,2))
+    -- ConvBlock 2
+    net:add(ConvolutionReLU(64, 128, 3,3))
+    if numLayers > 11 then net:add(ConvolutionReLU(128,128, 3,3)) end
+    net:add(MaxPooling(2,2, 2,2))
+    -- ConvBlock 3
+    net:add(ConvolutionReLU(128,256, 3,3))
+    net:add(ConvolutionReLU(256,256, 3,3))
+    if numLayers > 13 then net:add(ConvolutionReLU(256,256, 3,3)) end
+    if numLayers > 19 then net:add(ConvolutionReLU(256,256, 3,3)) end
+    net:add(MaxPooling(2,2, 2,2))
+    -- ConvBlock 4
+    net:add(ConvolutionReLU(256,512, 3,3))
+    net:add(ConvolutionReLU(512,512, 3,3))
+    if numLayers > 13 then net:add(ConvolutionReLU(512,512, 3,3)) end
+    if numLayers > 16 then net:add(ConvolutionReLU(512,512, 3,3)) end
+    net:add(MaxPooling(2,2, 2,2))
+    -- ConvBlock 5
+    net:add(ConvolutionReLU(512,512, 3,3))
+    net:add(ConvolutionReLU(512,512, 3,3))
+    if numLayers > 13 then net:add(ConvolutionReLU(512,512, 3,3)) end
+    if numLayers > 16 then net:add(ConvolutionReLU(512,512, 3,3)) end
+    net:add(MaxPooling(2,2, 2,2))
+    -- ConvBlock 6
+    net:add(ConvolutionReLU(512,4096,7,7))
+    net:add(Dropout())
+    -- ConvBlock 7
+    net:add(ConvolutionReLU(4096,4096,1,1))
+    net:add(Dropout())
+    -- Classification layer
+    net:add(Convolution(4096,1000,1,1))
+    
+    if initMethod then
+        P.initializeNetWeights(net,initMethod,...)
+    end
+
+    return net
+end
+
+-- "Semantic Image Segmentation with Deep Convolutional Nets and Fully Connected CRFs"
+-- Liang-Chieh Chen, George Papandreou, Iasonas Kokkinos, Kevin Murphy, Alan Yuille (ICLR 2015)
+function P.DeepLab(numClasses,opts,initMethod,...)
+end
+
+-- "Deep Residual Learning for Image Recognition"
+-- Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun (CVPR 2015)
+function P.ResNet(numClasses,numLayers,opts,initMethod)
+end
+
+-- "Multi-scale Context Aggregation by Dilated Convolutions" 
+-- Fisher Yu and Vladlen Koltun (ICLR 2016)
+function P.CADC(numClasses,opts,initMethod,...)
     local net = nn.Sequential()
 
     local function SpatialConvBNormReLU(...)
