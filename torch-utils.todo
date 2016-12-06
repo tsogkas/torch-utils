@@ -1,0 +1,20 @@
+Dataset manipulations classes:
+    ☐ Dataset.lua class: add methods shared by all children classes.
+    ☐ BSDS500.lua
+    ☐ VOC Pascal detection
+    ☐ VOC Pascal context
+    ☐ VOC Pascal segmentation
+    ☐ MS COCO
+    ☐ Imagenet
+
+networks.lua:
+    ☐ Add more architectures.
+    ☐ Debug methods memory consumption estimation by network.
+
+misc.lua:
+    ☐ Add more functions.
+
+Tester:
+    Create a tester file for debugging all the code
+    
+    

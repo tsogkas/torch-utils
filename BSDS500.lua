@@ -1,5 +1,6 @@
 require 'paths'
 require 'image'
+local matio = require 'matio'
 local BSD,parent = torch.class('BSDS500','Dataset')
 
 function BSD:__init(path)
@@ -17,13 +18,6 @@ function BSD:__setPaths(rootDir)
     self.paths.labelTestDir  = paths.concat(self.paths.labelDir,'test')
 end
 
-
-function BSD:paths()
-    if self.paths.rootDir  then print('Root directory:   '..self.paths.rootDir) end
-    if self.paths.imageDir then print('Images directory: '..self.paths.imageDir) end
-    if self.paths.labelDir then print('Labels directory: '..self.paths.labelDir) end
-end
-
 function BSD:size()
     return self.size or #self.imageFiles
 end
@@ -32,45 +26,94 @@ local function readFilenames(dir)
     local list = {}
     for file in paths.files(dir) do 
         local ext = file:lower():sub(-4)
-        if ext == '.jpg'  then
-            table.insert(list,file)
+        if ext == '.jpg' or ext == '.mat'  then -- only .jpg or .mat files used in BSDS500
+            list[#list+1] = file
         end
     end
     return list
 end
 
 function BSD:subset(set)
-    -- Select type of subset
-    local suffix
-    if set:lower() == 'train' then suffix = 'TrainDir'
-    elseif set:lower() == 'val' then suffix = 'ValDir'
-    elseif set:lower() == 'test' then suffix = 'TestDir'
-    else error('Invalid subset') end
     -- Create new BSD object to store the subset
     local s = self.new()
-    -- Store file names for images and labels
-    s.imageFiles = table.sort(readFilenames(self['image'..suffix]))
-    s.labelFiles = table.sort(readFilenames(self['label'..suffix]))
-    if #s == 0 then error('No files found!') end
+    -- Select type of subset and store file names for images and labels
+    if set:lower() == 'train' then 
+        s.imageFiles = readFilenames(self.paths.imageTrainDir)
+        s.labelFiles = readFilenames(self.paths.labelTrainDir)
+    elseif set:lower() == 'val' then
+        s.imageFiles = readFilenames(self.paths.imageValDir)
+        s.labelFiles = readFilenames(self.paths.labelValDir)
+    elseif set:lower() == 'test' then
+        s.imageFiles = readFilenames(self.paths.imageTestDir)
+        s.labelFiles = readFilenames(self.paths.labelTestDir)
+    elseif set:lower() == 'trainval' then
+        -- Concatenate filenames for train and val sets
+        s.imageFiles = readFilenames(self.paths.imageTrainDir)
+        local t = readFilenames(self.paths.imageValDir)
+        for i=1,#t do s1.imageFiles[#s1.imageFiles+1] = t[i] end 
+        -- Same for labels 
+        s.labelFiles = readFilenames(self.paths.labelTrainDir)
+        t = readFilenames(self.paths.labelValDir)
+        for i=1,#t do s.labelFiles[#s.labelFiles+1] = t[i] end
+        table.sort(s.imageFiles) -- sort results alphabetically
+        table.sort(s.labelFiles)
+    else error('Invalid subset') 
+    end
+    assert(#s > 0, 'No files found!')
     assert(#s.imageFiles == #s.labelFiles,'Image and label file count mismatch')
     return s
 end
 
+-- Shortcut methods for convenience in creating subsets 
+function BSD:trainData()     return BSD:subset('train') end
+function BSD:valData()       return BSD:subset('val')   end
+function BSD:testData()      return BSD:subset('test')  end
+function BSD:trainValData()  return BSD:subset('trainval')  end
+
+-- Read single image
 function BSD:readImage(img)
-    if torch.type(img) == 'number' then img = tostring(img)..'.jpg' end 
+    -- If the image has already been loaded and stored, return it
+    if self.images and self.images[img] then return self.images[img] end
+    -- Otherwise, turn the name into a valid name string
+    if torch.type(img) == 'number' then img = tostring(img)..'.jpg' end
+    -- Look for it everywhere and return the set where you found it 
     if paths.filep(paths.concat(self.imageTrainDir,img)) then
-        img = paths.concat(self.imageTrainDir,img)
+        return image.load(paths.concat(self.imageTrainDir,img)), 'train'
     elseif paths.filep(paths.concat(self.imageValDir,img)) then
-        img = paths.concat(self.imageValDir,img)
+        return image.load(paths.concat(self.imageValDir,img)), 'val'
     elseif paths.filep(paths.concat(self.imageTestDir,img)) then
-        img = paths.concat(self.imageTestDir,img)
+        return image.load(paths.concat(self.imageTestDir,img)), 'test'
     else error('Image file not found')
     end 
-    return image.load(img)
 end
 
-function BSD:shuffle()
+-- Read single label map
+function BSD:readSegmentation(seg)
+    -- If the image has already been loaded and stored, return it
+    if self.labels and self.labels[seg] then return self.labels[seg] end
+    -- Otherwise, turn the name into a valid name string
+    if torch.type(seg) == 'number' then seg = tostring(seg)..'.mat' end
+    -- Look for it everywhere and return the set where you found it
+    if paths.filep(paths.concat(self.labelTrainDir,seg)) then
+        return matio.load(paths.concat(self.labelTrainDir,seg)), 'train'
+    elseif paths.filep(paths.concat(self.labelValDir,seg)) then
+        return matio.load(paths.concat(self.labelValDir,seg)), 'val'
+    elseif paths.filep(paths.concat(self.labelTestDir,seg)) then
+        return matio.load(paths.concat(self.imageTestDir,seg)), 'test'
+    else error('Image file not found')
+    end 
 end
 
-function BSD:computeStats()
-end
+-- Store a table with all images in the set
+function BSD:readAllData()
+    -- Store images
+    for _,file in ipairs(self.imageFiles)
+        local id = file:sub(1,-4) -- we assume that the extension is always .jpg
+        self.images[id] = self:readImage(file)
+    end
+    -- Store labels
+    for _,file in ipairs(self.labelFiles)
+        local id = file:sub(1,-4) -- we assume that the extension is always .jpg
+        self.labels[id] = self:readSegmentation(file)
+    end     
+end 
