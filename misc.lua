@@ -42,49 +42,43 @@ end
 -------------------------- SIZE, TIMING AND STRINGS ----------------------------
 --------------------------------------------------------------------------------
 -- Return size of torch tensor in bytes ----------------------------------------
-function P.sizeof(x)
-    -- TODO: make this implementation-generic (use type sizes for the current machine)
-    -- TODO: add support for generic string
+function P.sizeof(x,dtype)
     if  torch.isTensor(x) then
+        local dtype = x:type()
         local sizeOfElementInBytes
-        if x:type() == 'torch.DoubleTensor' or x:type() == 'torch.LongTensor' then
+        if dtype == 'torch.DoubleTensor' or dtype == 'torch.LongTensor' then
             sizeOfElementInBytes = 8
-        elseif x:type() == 'torch.FloatTensor' or x:type() == 'torch.IntTensor' then
+        elseif dtype == 'torch.FloatTensor' or dtype == 'torch.IntTensor' then
             sizeOfElementInBytes = 4
-        elseif x:type() == 'torch.ShortTensor' then
+        elseif dtype == 'torch.ShortTensor' then
             sizeOfElementInBytes = 2
-        elseif x:type() == 'torch.CharTensor' or x:type() == 'torch.ByteTensor' then
+        elseif dtype == 'torch.CharTensor' or dtype == 'torch.ByteTensor' then
             sizeOfElementInBytes = 1
-        elseif x:type() == 'torch.CudaTensor' or x:type() == 'torch.CudaIntTensor' then
+        elseif dtype == 'torch.CudaTensor' or dtype == 'torch.CudaIntTensor' then
             sizeOfElementInBytes = 4
         else
             error('Unknown tensor type')
         end
-        return (x:nElement() * sizeOfElementInBytes)
+        return x:nElement() * sizeOfElementInBytes
     elseif type(x) == 'string' then
-        if x == 'torch.DoubleTensor' or x == 'torch.LongTensor' then
-            return 8
-        elseif x == 'torch.FloatTensor' or x == 'torch.IntTensor' then
-            return 4
-        elseif x == 'torch.ShortTensor' then
-            return 2
-        elseif x == 'torch.CharTensor' or x == 'torch.ByteTensor' then
-            return 1
-        elseif x == 'torch.CudaTensor' or x == 'torch.CudaIntTensor' then
-            sizeOfElementInBytes = 4
-        else
-            error('Unknown tensor type')
-        end
+        return x:len() -- each char is 1 byte (including a null \0 termination char)
     elseif type(x) == 'number' then -- if it's a number we consider  this is the size
-        return x
+        local dtype = dtype or 'double'
+        local sizeOfElementInBytes
+        if dtype == 'double' or dtype == 'long' then sizeOfElementInBytes = 8
+        elseif dtype == 'int' or dtype == 'float' then sizeOfElementInBytes = 4
+        elseif dtype == 'short' then sizeOfElementInBytes = 2
+        elseif dtype == 'char' or dtype == 'byte' then sizeOfElementInBytes = 1
+        end 
+        return x * sizeOfElementInBytes
     else
-        error('Only tensors and string (tensor types) are supported!')
+        error('Only tensors, string and number types are supported!')
     end
 end
 
 -- Print size of torch tensor (adjusts for size in KB, MB, GB etc) -------------
-function P.size2string(x)
-    local sizeInBytes = P.sizeof(x)
+function P.size2string(x,dtype)
+    local sizeInBytes = P.sizeof(x,dtype)
     local KB = 1024
     local MB = 1024^2
     local GB = 1024^3
@@ -100,8 +94,6 @@ function P.size2string(x)
     end
     return str
 end
-
-function P.printSizeOf(x) print(P.size2string(x)) end
 
 -- Print timings in sec, minutes, hours (assumes input in sec)) ----------------
 function  P.time2string(t)
@@ -124,40 +116,34 @@ function  P.time2string(t)
     return str
 end
 
-function P.printTime(t) print(P.time2str(t)) end
-
 --------------------------------------------------------------------------------
 -- ARITHMETIC CHECKING AND VECTOR/MATRIX MANIPULATIONS -------------------------
 --------------------------------------------------------------------------------
-function P.isnan(x) return x:ne(x) end
-function P.isinf(x) return x:eq(math.huge) end
-function P.isvec(x) return x:nDimension() == 1 end
-function P.ismat(x) return x:isTensor() and x:nDimension() == 2 end
-function P.isint(x) return x % 1 == 0 end
-function P.isodd(x) return x % 2 == 1 end
-function P.vec(x)   return x:view(-1) end
+function P.vec(x) return x:view(-1) end
+function P.isvector(x) return x:nDimension() == 1 end
+function P.ismatrix(x) return x:nDimension() == 2 end
+function P.isnumber(x) return type(x) == 'number' end
+function P.isstring(x) return type(x) == 'string' end
+function P.isinteger(x) return P.isnumber(x) and (x % 1 == 0)
+                        or torch.isTensor(x) and torch.remainder(x,1):eq(0) end
+function P.isodd(x) return P.isnumber(x) and (x % 2 == 1)
+                    or torch.isTensor(x) and torch.remainder(x,2):eq(0) end
+function P.isnan(x) return (P.isnumber(x) and x~=x) or (torch.isTensor(x) and x:ne(x)) end
+function P.isinf(x) return (P.isnumber(x) and math.abs(x) == inf) 
+                    or (torch.isTensor(x) and torch.abs(x):eq(math.huge)) end
 
 --------------------------------------------------------------------------------
 -------------------------- LOGICAL OPERATIONS ----------------------------------
 --------------------------------------------------------------------------------
 function P.any(a,dim) -- same as torch.any() but can also work dimension-wise
-    if dim then
-        return a:ne(0):sum(dim):gt(0)
-    else
-        return torch.any(d)
-    end
+    return dim and a:ne(0):sum(dim):gt(0) or torch.any(d)  
 end
 function P.all(a,dim) -- same as torch.all() but can also work dimension-wise
-    if dim then
-        return a:ne(0):sum(dim):eq(a:size(dim))
-    else
-        return torch.all(d)
-    end
+    return dim and a:ne(0):sum(dim):eq(a:size(dim)) or torch.all(d) 
 end
 function P.land(a,b)return a:gt(0):eq(b:gt(0)) end
 function P.lor(a,b) return torch.gt(a+b) end
 function P.iou(a,b)
-    -- TODO: does not cover case where a and b are masks that have size(2) == 4
     local a,b = function(a,b)
         if not torch.isTensor(a) then
             assert(#a==4, 'Bounding boxes should be in the form: [xmin, xmax, ymin, ymax]')
@@ -172,8 +158,14 @@ function P.iou(a,b)
 
     local max = torch.max
     local min = torch.min
+    -- a and b are masks of the same size
+    if a:type() == 'torch.ByteTensor' and b:type() == 'torch.ByteTensor' then
+        assert(a:isSameSizeAs(b), 'Tensors must have the same size')
+        local intersection = torch.sum(P.land(a,b))
+        local union = torch.sum(P.lor(a,b))
+        return union > 0 and intersection/union or 0 
     -- a,b are bounding box coordinates in the form [xmin, xmax, ymin, ymax]
-    if a:nDimension() == 1 and b:nDimension() == 1 then
+    elseif a:nDimension() == 1 and b:nDimension() == 1 then
         assert(a:nElement() == 4 and b:nElement() == 4,
         'Bounding boxes should be in the form: [xmin, xmax, ymin, ymax]')
         local intersectionBox = torch.Tensor(4)
@@ -211,12 +203,7 @@ function P.iou(a,b)
         res[iw:le(0)]:zero()
         res[ih:le(0)]:zero()
         return res
-    -- a and b are masks of the same size
-    else
-        assert(a:isSameSizeAs(b), 'Tensors must have the same size')
-        local intersection = torch.sum(P.land(a,b))
-        local union = torch.sum(P.lor(a,b))
-        return union > 0 and intersection/union or 0
+    else error('Inputs have invalid format')
     end
 end
 

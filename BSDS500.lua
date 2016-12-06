@@ -18,10 +18,9 @@ function BSD:__setPaths(rootDir)
     self.paths.labelTestDir  = paths.concat(self.paths.labelDir,'test')
 end
 
-function BSD:size()
-    return self.size or #self.imageFiles
-end
+function BSD:size() return self.size or #self.imageFiles end
 
+-- Read all .jpg or .mat files in a directory 
 local function readFilenames(dir)
     local list = {}
     for file in paths.files(dir) do 
@@ -33,6 +32,7 @@ local function readFilenames(dir)
     return list
 end
 
+-- Create instance that contains one of the train,val,test, or trainval subsets
 function BSD:subset(set)
     -- Create new BSD object to store the subset
     local s = self.new()
@@ -94,26 +94,28 @@ function BSD:readSegmentation(seg)
     -- Otherwise, turn the name into a valid name string
     if torch.type(seg) == 'number' then seg = tostring(seg)..'.mat' end
     -- Look for it everywhere and return the set where you found it
+    local matfile,set
     if paths.filep(paths.concat(self.labelTrainDir,seg)) then
-        return matio.load(paths.concat(self.labelTrainDir,seg)), 'train'
+        matfile,set = matio.load(paths.concat(self.labelTrainDir,seg)), 'train'
     elseif paths.filep(paths.concat(self.labelValDir,seg)) then
-        return matio.load(paths.concat(self.labelValDir,seg)), 'val'
+        matfile,set = matio.load(paths.concat(self.labelValDir,seg)), 'val'
     elseif paths.filep(paths.concat(self.labelTestDir,seg)) then
-        return matio.load(paths.concat(self.imageTestDir,seg)), 'test'
+        matfile,set = matio.load(paths.concat(self.imageTestDir,seg)), 'test'
     else error('Image file not found')
     end 
+    return matfile.groundTruth, set
 end
 
 -- Store a table with all images in the set
 function BSD:readAllData()
     -- Store images
-    for _,file in ipairs(self.imageFiles)
+    for _,file in ipairs(self.imageFiles) do
         local id = file:sub(1,-4) -- we assume that the extension is always .jpg
         self.images[id] = self:readImage(file)
     end
     -- Store labels
-    for _,file in ipairs(self.labelFiles)
+    for _,file in ipairs(self.labelFiles) do
         local id = file:sub(1,-4) -- we assume that the extension is always .jpg
         self.labels[id] = self:readSegmentation(file)
-    end     
+    end
 end 

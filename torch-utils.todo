@@ -1,6 +1,6 @@
 Dataset manipulations classes:
     ☐ Dataset.lua class: add methods shared by all children classes.
-    ☐ BSDS500.lua
+    ✔ BSDS500.lua @done (2016-12-06, 11:29:41 AM)
     ☐ VOC Pascal detection
     ☐ VOC Pascal context
     ☐ VOC Pascal segmentation
