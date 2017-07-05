@@ -98,9 +98,9 @@ end
 -- Print timings in sec, minutes, hours (assumes input in sec)) ----------------
 function  P.time2string(t)
     local sec  = 1
-    local min  = 60
-    local hour = 60^2
-    local day  = 60^3
+    local min  = 60*sec
+    local hour = 60*min
+    local day  = 24*hour
     local str
     if t < sec then
         str = string.format('%d msec', t*1000)
